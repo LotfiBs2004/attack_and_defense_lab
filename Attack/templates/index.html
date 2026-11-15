@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Scanner | Dashboard</title>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body { font-family: Arial, sans-serif; background: #f1f5f9; color: #1e293b; }
+
+        header { background: #111827; color: white; padding: 22px 7%; }
+        header h1 { font-size: 25px; }
+        header p { color: #cbd5e1; margin-top: 7px; }
+
+        main { max-width: 1100px; margin: 35px auto; padding: 0 20px; }
+
+        .section {
+            background: white; padding: 25px; border-radius: 10px;
+            margin-bottom: 25px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        h2 { margin-bottom: 20px; font-size: 20px; }
+
+        .form-group { margin-bottom: 18px; }
+        label { display: block; margin-bottom: 8px; font-weight: bold; }
+
+        input[type=text], select {
+            width: 100%; padding: 12px; border: 1px solid #cbd5e1;
+            border-radius: 6px; font-size: 15px; background: white;
+        }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+
+        fieldset { border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; margin-bottom: 18px; }
+        legend { font-weight: bold; padding: 0 8px; }
+        label.check { display: inline-block; font-weight: normal; margin: 4px 18px 8px 0; }
+        label.check input { margin-right: 6px; }
+        .hint { color: #64748b; font-size: 13px; margin-top: 6px; }
+
+        button, a.btn {
+            background: #2563eb; color: white; padding: 12px 22px; border: none;
+            border-radius: 6px; cursor: pointer; font-size: 15px; text-decoration: none;
+            display: inline-block;
+        }
+        button:hover, a.btn:hover { background: #1d4ed8; }
+
+        .alert {
+            background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;
+            padding: 14px 18px; border-radius: 8px; margin-bottom: 25px; font-weight: bold;
+        }
+        .warn {
+            background: #fef3c7; color: #92400e; padding: 12px 16px;
+            border-radius: 8px; margin-bottom: 15px;
+        }
+        .cmd { margin-bottom: 12px; word-break: break-all; }
+        .cmd code { background: #f1f5f9; padding: 3px 7px; border-radius: 4px; }
+        .muted { color: #64748b; margin-bottom: 6px; }
+        .vulners-output {
+            background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+            padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere;
+        }
+
+        .status { display: inline-block; padding: 5px 10px; border-radius: 5px; font-size: 12px; font-weight: bold; }
+        .open { background: #dcfce7; color: #166534; }
+        .closed { background: #fee2e2; color: #991b1b; }
+        .filtered { background: #fef3c7; color: #92400e; }
+        .open-filtered, .closed-filtered, .unfiltered { background: #e0e7ff; color: #3730a3; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 13px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+        th { background: #f8fafc; }
+
+        .export-buttons { display: flex; gap: 12px; flex-wrap: wrap; }
+        footer { text-align: center; padding: 25px; color: #64748b; }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>Network Scanner</h1>
+        <p>Network Security Analysis Dashboard</p>
+    </header>
+
+    <main>
+
+        {% if error %}
+        <div class="alert">{{ error }}</div>
+        {% endif %}
+
+        <!-- Configuration du scan -->
+        <section class="section">
+            <h2>Nouvelle analyse</h2>
+
+            <form action="/scan" method="POST">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+
+                <div class="form-group">
+                    <label for="target">Adresse IP cible (réseau du labo : {{ lab_net }})</label>
+                    <input type="text" id="target" name="target" value="{{ form.get('target', '') }}"
+                           placeholder="Exemple : 192.168.100.11" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="ports">Ports à analyser</label>
+                    <input type="text" id="ports" name="ports" value="{{ form.get('ports', '') }}"
+                           placeholder="22,80  ·  1-1000  ·  T:22,U:5300  ·  -  (tous)  ·  vide = 1000 courants">
+                </div>
+
+                <div class="grid">
+                    <div class="form-group">
+                        <label for="engine">Moteur</label>
+                        <select id="engine" name="engine">
+                            <option value="nmap" {% if form.get('engine') != 'masscan' %}selected{% endif %}>nmap</option>
+                            <option value="masscan" {% if form.get('engine') == 'masscan' %}selected{% endif %}>masscan puis nmap -sV (TCP, rapide)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="scan_type">Type de scan</label>
+                        <select id="scan_type" name="scan_type">
+                            {% for key, info in scan_types.items() %}
+                            <option value="{{ key }}" {% if form.get('scan_type', 'syn') == key %}selected{% endif %}>{{ info[1] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="timing">Vitesse (-T0 lent … -T5 rapide)</label>
+                        <select id="timing" name="timing">
+                            {% for t in range(6) %}
+                            <option value="{{ t }}" {% if form.get('timing', '3') == t|string %}selected{% endif %}>-T{{ t }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <fieldset>
+                    <legend>Options pour trouver les services cachés</legend>
+
+                    <label class="check"><input type="checkbox" name="version" {% if not form or form.get('version') or form.get('vulners') %}checked{% endif %}> Versions (-sV)</label>
+                    <label class="check"><input type="checkbox" name="scripts" {% if form.get('scripts') %}checked{% endif %}> Scripts par défaut (-sC)</label>
+                    <label class="check"><input type="checkbox" name="vulners" {% if form.get('vulners') %}checked{% endif %}> CVE connues (NSE vulners)</label>
+                    <label class="check"><input type="checkbox" name="udp" {% if form.get('udp') %}checked{% endif %}> UDP (-sU, lent)</label>
+                    <label class="check"><input type="checkbox" name="pn" {% if form.get('pn') %}checked{% endif %}> Sans ping préalable (-Pn)</label>
+                    <label class="check"><input type="checkbox" name="frag" {% if form.get('frag') %}checked{% endif %}> Fragmentation (-f)</label>
+                    <label class="check"><input type="checkbox" name="decoy" {% if form.get('decoy') %}checked{% endif %}> Leurres (-D RND:5)</label>
+                    <label class="check"><input type="checkbox" name="defeat_rst" {% if form.get('defeat_rst') %}checked{% endif %}> --defeat-rst-ratelimit</label>
+
+                    <div class="grid">
+                        <div class="form-group">
+                            <label for="source_port">Port source (-g)</label>
+                            <input type="text" id="source_port" name="source_port" value="{{ form.get('source_port', '') }}" placeholder="ex. 53">
+                        </div>
+                        <div class="form-group">
+                            <label for="scan_delay">Délai entre sondes (--scan-delay)</label>
+                            <input type="text" id="scan_delay" name="scan_delay" value="{{ form.get('scan_delay', '') }}" placeholder="ex. 1s ou 500ms">
+                        </div>
+                    </div>
+                    <p class="hint">Le scan peut durer plusieurs minutes (surtout -p-, UDP ou -T0/-T1) : la page reste en attente, c'est normal.</p>
+                    <p class="hint">La vérification CVE nécessite le script NSE vulners dans Nmap et Internet. Les versions détectées sont envoyées à Vulners; les résultats sont des correspondances potentielles.</p>
+                </fieldset>
+
+                <button type="submit">Lancer le scan</button>
+            </form>
+        </section>
+
+        {% if results %}
+        <!-- Résultats -->
+        <section class="section">
+            <h2>Résultats de l'analyse</h2>
+
+            <p class="cmd"><b>Commande :</b> <code>{{ command }}</code></p>
+
+            {% if not results.ip %}
+            <div class="warn">Aucune réponse de l'hôte. Il bloque peut-être le ping : essayez l'option « Sans ping préalable (-Pn) ».</div>
+            {% endif %}
+
+            {% for extra in results.extraports %}
+            <p class="muted">{{ extra.count }} ports {{ extra.state }} (non listés individuellement)</p>
+            {% endfor %}
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Port</th>
+                        <th>Protocole</th>
+                        <th>État</th>
+                        <th>Raison</th>
+                        <th>Service</th>
+                        <th>Produit</th>
+                        <th>Version</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for port in results.ports %}
+                    <tr>
+                        <td>{{ port.port }}</td>
+                        <td>{{ port.protocol }}</td>
+                        <td><span class="status {{ port.css }}">{{ port.state | upper }}</span></td>
+                        <td>{{ port.reason }}</td>
+                        <td>{{ port.service }}</td>
+                        <td>{{ port.product }}</td>
+                        <td>{{ port.version }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7">Aucun port individuel détecté.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        {% if vulners_enabled %}
+        <section class="section">
+            <h2>Correspondances CVE potentielles</h2>
+            <p class="hint">Une correspondance de version n'est pas une confirmation de vulnérabilité; les bannières peuvent être inexactes ou corrigées par rétroportage.</p>
+            {% set cve_results = results.ports | selectattr('vulners') | list %}
+            {% if cve_results %}
+                {% for port in cve_results %}
+                <h3>{{ port.port }}/{{ port.protocol }} — {{ port.service }} {{ port.product }} {{ port.version }}</h3>
+                <pre class="vulners-output">{{ port.vulners }}</pre>
+                {% endfor %}
+            {% else %}
+            <p>Aucun résultat CVE n'a été retourné. Cela ne garantit pas l'absence de vulnérabilités; vérifiez le script NSE et la connexion Internet.</p>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        <!-- Export -->
+        <section class="section">
+            <h2>Exporter les résultats</h2>
+            <div class="export-buttons">
+                <a href="/export/json" class="btn">Exporter JSON</a>
+                <a href="/export/xml" class="btn">Exporter XML</a>
+            </div>
+        </section>
+        {% endif %}
+
+    </main>
+
+    <footer>
+        <p>Network Scanner — Academic Project | Master RSE</p>
+    </footer>
+
+</body>
+</html>
